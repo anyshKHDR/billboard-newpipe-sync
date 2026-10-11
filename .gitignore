@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Generated data — never commit
+all.json
+master.json
+master_test.json
+urls.json
+failed.json
+*.zip
+.env
