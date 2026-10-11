@@ -2,12 +2,17 @@
 __pycache__/
 *.pyc
 
-# Generated data — never commit
+# Billboard source data
 all.json
+recent.json
+
+# Generated state
 master.json
-master_test.json
 urls.json
 failed.json
-*.zip
-.env
+
+# NewPipe backups
+NewPipeData-*.zip
+
+# Temp extraction
 work_extract/
