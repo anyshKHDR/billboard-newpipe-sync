@@ -10,3 +10,4 @@ urls.json
 failed.json
 *.zip
 .env
+work_extract/
