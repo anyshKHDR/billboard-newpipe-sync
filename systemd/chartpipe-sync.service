@@ -1,0 +1,10 @@
+[Unit]
+Description=Chartpipe NewPipe sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/chartpipe-work/weekly-sync.sh
+StandardOutput=journal
+StandardError=journal
