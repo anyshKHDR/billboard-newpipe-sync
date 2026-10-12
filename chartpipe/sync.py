@@ -39,24 +39,21 @@ def run(backup_zip: Path, output_zip: Path,
         dry_run: bool = False, refresh: bool = True) -> dict:
     stats = {"chart_date": None, "new": 0, "resolved": 0, "failed": 0, "total": 0}
 
-    # 1. Fetch current chart
     chart = billboard.fetch_recent(refresh=refresh)
     stats["chart_date"] = chart["date"]
-    print(f"Chart date: {chart['date']}")
+    print(f"Chart date: {chart['date']}", flush=True)
 
-    # 2. Load cache and find new songs
     urls = load_urls()
-    print(f"Cache: {len(urls)} songs")
+    print(f"Cache: {len(urls)} songs", flush=True)
     new = _find_new(urls, chart)
     stats["new"] = len(new)
-    print(f"New songs: {len(new)}")
+    print(f"New songs: {len(new)}", flush=True)
 
     if dry_run:
         for e in new:
-            print(f"  would resolve: {e['song']} — {e['artist']}")
+            print(f"  would resolve: {e['song']} — {e['artist']}", flush=True)
         return stats
 
-    # 3. Resolve new songs (prepend to cache to keep newest-first)
     if new:
         yt = YTMusic()
         resolved_batch = []
@@ -65,17 +62,16 @@ def run(backup_zip: Path, output_zip: Path,
             if result:
                 resolved_batch.append(result)
                 stats["resolved"] += 1
-                print(f"[{i}/{len(new)}] {entry['song']} — {entry['artist']}  OK")
+                print(f"[{i}/{len(new)}] {entry['song']} — {entry['artist']}  OK", flush=True)
             else:
                 stats["failed"] += 1
-                print(f"[{i}/{len(new)}] {entry['song']} — {entry['artist']}  FAIL {reason}")
+                print(f"[{i}/{len(new)}] {entry['song']} — {entry['artist']}  FAIL {reason}", flush=True)
             time.sleep(config.SEARCH_SLEEP)
             if i % 10 == 0:
                 save_urls(list(reversed(resolved_batch)) + urls)
         urls = list(reversed(resolved_batch)) + urls
         save_urls(urls)
 
-    # 4. Inject into NewPipe DB
     work = config.WORK_DIR
     if work.exists():
         shutil.rmtree(work)
@@ -91,14 +87,13 @@ def run(backup_zip: Path, output_zip: Path,
     inject_stats = db.inject(db_path, urls, config.PLAYLIST_NAME)
     stats["total"] = inject_stats["songs"]
     print(f"Playlist '{config.PLAYLIST_NAME}' uid={inject_stats['playlist_id']}, "
-          f"{inject_stats['songs']} songs")
+          f"{inject_stats['songs']} songs", flush=True)
 
-    # 5. Repackage
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in sorted(work.iterdir()):
             if f.is_file():
                 zf.write(f, f.name)
-    print(f"Wrote {output_zip}")
+    print(f"Wrote {output_zip}", flush=True)
 
     shutil.rmtree(work)
     return stats

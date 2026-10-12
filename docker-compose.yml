@@ -2,9 +2,10 @@ services:
   chartpipe:
     build:
       context: .
-      network: host
+      privileged: false
+      # or use:
+      # args: {}
     image: chartpipe:latest
-    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./:/data
     environment:
