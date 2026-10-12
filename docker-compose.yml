@@ -1,6 +1,8 @@
 services:
   chartpipe:
-    build: .
+    build:
+      context: .
+      network: host
     image: chartpipe:latest
     volumes:
       - ./:/data
