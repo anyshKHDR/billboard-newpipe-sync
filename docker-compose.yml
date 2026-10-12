@@ -4,6 +4,7 @@ services:
       context: .
       network: host
     image: chartpipe:latest
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./:/data
     environment:
