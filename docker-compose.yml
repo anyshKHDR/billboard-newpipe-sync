@@ -1,0 +1,9 @@
+services:
+  chartpipe:
+    build: .
+    image: chartpipe:latest
+    volumes:
+      - ./:/data
+    environment:
+      CHARTPIPE_PLAYLIST: Billboard Hot 100
+      CHARTPIPE_SLEEP: "1.5"

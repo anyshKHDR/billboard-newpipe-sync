@@ -2,13 +2,15 @@ from pathlib import Path
 import os
 
 ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.environ.get("CHARTPIPE_DATA", ROOT))
 
 # Data files (gitignored)
-ALL_JSON    = ROOT / "all.json"
-RECENT_JSON = ROOT / "recent.json"
-MASTER_JSON = ROOT / "master.json"
-URLS_JSON   = ROOT / "urls.json"
-FAILED_JSON = ROOT / "failed.json"
+ALL_JSON    = DATA_DIR / "all.json"
+RECENT_JSON = DATA_DIR / "recent.json"
+MASTER_JSON = DATA_DIR / "master.json"
+URLS_JSON   = DATA_DIR / "urls.json"
+FAILED_JSON = DATA_DIR / "failed.json"
+WORK_DIR    = DATA_DIR / "work_extract"
 
 # Billboard source
 BILLBOARD_BASE  = "https://raw.githubusercontent.com/mhollingshead/billboard-hot-100/refs/heads/main"

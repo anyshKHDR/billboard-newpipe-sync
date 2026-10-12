@@ -76,10 +76,10 @@ def run(backup_zip: Path, output_zip: Path,
         save_urls(urls)
 
     # 4. Inject into NewPipe DB
-    work = Path("work_extract")
+    work = config.WORK_DIR
     if work.exists():
         shutil.rmtree(work)
-    work.mkdir()
+    work.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(backup_zip) as zf:
         zf.extractall(work)

@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+
+# Data — never bake into the image
+all.json
+recent.json
+master.json
+urls.json
+failed.json
+*.zip
+work_extract/
+
+# Editor cruft
+*.swp
+.DS_Store
