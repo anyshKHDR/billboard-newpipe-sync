@@ -4,220 +4,216 @@ Sync the Billboard Hot 100 chart into a NewPipe playlist — automatically.
 
 Chartpipe fetches the weekly Billboard chart, resolves each song to a YouTube
 URL via YouTube Music, and injects the results into a NewPipe database backup.
-Over time, your playlist becomes a growing archive of every song that charted.
+Songs are cached, so weekly runs only process genuinely new chart entries.
 
----
+**Features:**
 
-## Table of Contents
-
-- [How It Works](#how-it-works)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Commands](#commands)
-- [Project Layout](#project-layout)
-- [Data Files](#data-files)
-- [How the Pipeline Works](#how-the-pipeline-works)
-- [Design Decisions](#design-decisions)
-- [Troubleshooting](#troubleshooting)
-- [Environment Variables](#environment-variables)
+- Incremental sync — only resolves new songs (~5–25 per week)
+- Automatic artist validation (rejects covers, karaoke, wrong matches)
+- Idempotent — safe to run repeatedly, no duplicates
+- Accumulative — songs stay in the playlist after dropping off the chart
+- Fully automated via Docker + systemd
 
 ---
 
 ## How It Works
-
-The pipeline has three stages, each handled by a separate module:
 
 ```
 Billboard JSON  →  YouTube URLs  →  NewPipe DB  →  App
     (parse)         (resolve)        (inject)
 ```
 
-1. **Parse** — Fetch the Billboard chart JSON from GitHub. Walk it newest-first,
-   deduplicate by `(song, artist)`, and produce a master list.
+1. **Parse** — Fetch the current Billboard chart from GitHub
+2. **Resolve** — Search YouTube Music for each new song, cache the video URL
+3. **Inject** — Write all cached URLs into a copy of your NewPipe database
 
-2. **Resolve** — For each song not already cached, search YouTube Music, validate
-   the artist match, and store the resulting video URL in `urls.json`.
-
-3. **Inject** — Write every cached URL into a copy of your NewPipe database,
-   attach them to a playlist, and repackage as a new backup zip.
-
-Because resolved songs are cached, weekly runs only process genuinely new chart
-entries — usually 5–25 songs, taking under a minute.
+The resolved-URL cache lives in `urls.json` and is never re-searched.
 
 ---
 
-## Installation
+## Quick Start
 
-Requires **Python 3.10+**.
+### 1. Install
 
 ```bash
 git clone <your-repo-url>
 cd billboard-newpipe-sync
 
 python -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
-
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Verify the install:
+Requires **Python 3.10+**.
 
-```bash
-python -c "import ytmusicapi; print(ytmusicapi.__version__)"
-```
+### 2. Export a NewPipe backup
 
----
+On your phone: **Settings → Backup and restore → Export database**.
+Copy the resulting `NewPipeData-*.zip` to your machine and rename it to
+`NewPipeData-in.zip`.
 
-## Quick Start
+### 3. Bootstrap the cache (first time only)
 
-### First time ever
-
-Export a backup from NewPipe (**Settings → Backup and restore → Export
-database**) and copy it to your machine. Call it `NewPipeData-in.zip`.
-
-Then run a bootstrap to build your initial song cache:
-
-```bash
-# Songs from 2015 onward — roughly 3 hours
-python -m chartpipe bootstrap --since 2015-01-01
-```
-
-Run it in `tmux` so an SSH disconnect doesn't kill it:
+Resolves historical songs. Takes hours — run in `tmux`.
 
 ```bash
 tmux new -s bootstrap
 python -m chartpipe bootstrap --since 2015-01-01
 # Ctrl-B, then D to detach
-# tmux attach -t bootstrap to check on it later
 ```
 
-When it finishes, run a sync to inject everything into NewPipe:
+For a quick test, use `--limit 20`.
+
+### 4. Sync and import
 
 ```bash
 python -m chartpipe sync NewPipeData-in.zip
 ```
 
-Import `NewPipeData-out.zip` into NewPipe via **Settings → Backup and restore →
-Import database**. Force-close NewPipe first.
+This produces `NewPipeData-out.zip`. Import it into NewPipe
+(**Settings → Backup and restore → Import database**). Force-close NewPipe first.
 
-### Every week after that
+### 5. Every week after that
 
 ```bash
-# Export a fresh backup from NewPipe → save as NewPipeData-in.zip
+# Export fresh backup from phone → save as NewPipeData-in.zip
 python -m chartpipe sync NewPipeData-in.zip
-
 # Import NewPipeData-out.zip into NewPipe
 ```
 
-That's it. Only the new chart entries get resolved, and the playlist grows.
+Only new songs are resolved. The playlist grows.
 
 ---
 
 ## Commands
 
-### `sync`
-
-Incremental update — the command you run weekly.
+### `sync` — incremental update (run weekly)
 
 ```bash
 python -m chartpipe sync NewPipeData-in.zip
 ```
 
-| Flag              | Effect                                            |
-| ----------------- | ------------------------------------------------- |
-| `-o`, `--out PATH`| Output zip path (default: `NewPipeData-out.zip`)  |
-| `--dry-run`       | Show what would resolve; no API calls, no DB write |
+| Flag              | Effect                                             |
+| ----------------- | -------------------------------------------------- |
+| `-o`, `--out PATH`| Output zip path (default: `NewPipeData-out.zip`)   |
+| `--dry-run`       | Preview only — no API calls, no DB writes          |
 | `--no-refresh`    | Use cached `recent.json` instead of re-downloading |
 
-**Example — see what sync would do without running it:**
-
-```bash
-python -m chartpipe sync NewPipeData-in.zip --dry-run
-```
-
-Output:
-
-```
-Chart date: 2026-10-10
-Cache: 100 songs
-New songs: 5
-  would resolve: Patient Zero — Taylor Swift
-  ...
-```
-
-### `bootstrap`
-
-One-time historical load. Fetches `all.json`, builds the master song list, and
-resolves everything in scope.
+### `bootstrap` — one-time historical load
 
 ```bash
 python -m chartpipe bootstrap --since 2015-01-01
 ```
 
-| Flag               | Effect                                             |
-| ------------------ | -------------------------------------------------- |
-| `--since YYYY-MM-DD` | Only resolve songs with `first_seen` on/after this date |
-| `--limit N`        | Stop after N songs (for testing)                   |
-| `--dry-run`        | List songs without resolving                       |
-| `--refresh`        | Re-download `all.json` even if cached locally       |
+| Flag                 | Effect                                          |
+| -------------------- | ----------------------------------------------- |
+| `--since YYYY-MM-DD` | Only resolve songs appearing on/after this date |
+| `--limit N`          | Stop after N songs (for testing)                |
+| `--dry-run`          | List without resolving                          |
+| `--refresh`          | Re-download `all.json` even if cached           |
 
 **Examples:**
 
 ```bash
-# Full history back to 1958 (~17 hours)
-python -m chartpipe bootstrap --since 1958-01-01
-
-# Small test — resolve only 20 songs
-python -m chartpipe bootstrap --since 2026-01-01 --limit 20
-
-# Force fresh download of all.json
-python -m chartpipe bootstrap --since 2015-01-01 --refresh
+python -m chartpipe bootstrap --since 1958-01-01              # full history (~17h)
+python -m chartpipe bootstrap --since 2026-01-01 --limit 20   # quick test
 ```
 
-`all.json` is 42 MB and mostly historical. By default, bootstrap reuses a locally
-cached copy and only downloads it once. Use `--refresh` if you want the very
-latest.
+---
+
+## Docker
+
+Build and run without a Python environment:
+
+```bash
+# Build the image
+docker compose build
+
+# Dry run
+docker compose run --rm chartpipe sync /data/NewPipeData-in.zip --dry-run
+
+# Real run
+docker compose run --rm chartpipe sync /data/NewPipeData-in.zip \
+                                    -o /data/NewPipeData-out.zip
+```
+
+The project directory is mounted at `/data` inside the container. Pull
+pre-built images from GHCR with:
+
+```bash
+docker run --rm -v ~/chartpipe-work:/data \
+  ghcr.io/YOUR_USERNAME/chartpipe:latest \
+  sync /data/NewPipeData-in.zip -o /data/NewPipeData-out.zip
+```
+
+---
+
+## Automated Weekly Sync (systemd)
+
+Install the timer so sync runs automatically every Wednesday:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/chartpipe-sync.service systemd/chartpipe-sync.timer ~/.config/systemd/user/
+cp systemd/weekly-sync.sh ~/chartpipe-work/weekly-sync.sh
+chmod +x ~/chartpipe-work/weekly-sync.sh
+
+systemctl --user daemon-reload
+systemctl --user enable --now chartpipe-sync.timer
+
+# Survive logout / run headless
+sudo loginctl enable-linger $USER
+```
+
+See [`systemd/README.md`](systemd/README.md) for details.
+
+**Weekly workflow once automated:**
+
+1. Upload a fresh `NewPipeData-in.zip` to `~/chartpipe-work/`
+2. systemd runs the sync unattended
+3. Download `~/chartpipe-work/NewPipeData-out.zip` → import into NewPipe
 
 ---
 
 ## Project Layout
 
 ```
-chartpipe/                The package
-├── __init__.py           Version marker
-├── __main__.py           CLI entry point (argparse)
-├── config.py             Paths, constants, environment variables
+chartpipe/                Python package
+├── __main__.py           CLI entry point
+├── config.py             Paths, constants, env vars
 ├── billboard.py          Fetch + parse Billboard JSON
-├── resolver.py           YouTube Music search + artist validation
+├── resolver.py           YouTube Music search + validation
 ├── db.py                 NewPipe SQLite injection
 ├── sync.py               Incremental orchestrator (weekly)
-└── bootstrap.py          Full-history orchestrator (one-time)
+└── bootstrap.py          Historical load (one-time)
 
-tests/                    Unit tests (planned)
-pyproject.toml            Package metadata + `chartpipe` command
+systemd/                  Deployment files
+├── chartpipe-sync.service
+├── chartpipe-sync.timer
+└── weekly-sync.sh
+
+Dockerfile                Container image
+docker-compose.yml        Local dev / build
+pyproject.toml            Package metadata
 requirements.txt          Python dependencies
-README.md                 This file
 ```
 
 ---
 
 ## Data Files
 
-These are generated automatically and gitignored:
+Generated automatically and gitignored:
 
-| File                  | Purpose                                                    |
-| --------------------- | ---------------------------------------------------------- |
-| `all.json`            | Raw Billboard history dump (~42 MB)                        |
-| `recent.json`         | Current week's chart (small, re-fetched each sync)         |
-| `master.json`         | Deduplicated song list, newest-first                       |
-| `urls.json`           | Song → YouTube URL cache (**the source of truth**)          |
-| `failed.json`         | Songs that could not be resolved                           |
-| `NewPipeData-in.zip`  | Your NewPipe backup — input to `sync`                      |
-| `NewPipeData-out.zip` | Modified backup — output from `sync`, import back into app |
-| `work_extract/`       | Temp directory during injection (auto-created/removed)     |
+| File                  | Purpose                                          |
+| --------------------- | ------------------------------------------------ |
+| `all.json`            | Raw Billboard history (~42 MB)                   |
+| `recent.json`         | Current week's chart                             |
+| `master.json`         | Deduplicated song list, newest-first             |
+| `urls.json`           | Song → YouTube URL cache (**source of truth**)   |
+| `failed.json`         | Songs that couldn't be resolved                  |
+| `NewPipeData-*.zip`   | NewPipe backups (input/output)                   |
 
-**`urls.json` is the most important file.** It holds every resolved song and is
-never re-searched. Back it up before risky operations:
+**`urls.json` is the most important file.** Back it up before risky operations:
 
 ```bash
 cp urls.json urls.json.bak
@@ -225,183 +221,52 @@ cp urls.json urls.json.bak
 
 ---
 
-## How the Pipeline Works
+## Design Notes
 
-### 1. Billboard parsing
-
-The source repo publishes `all.json` (every chart since 1958) and `recent.json`
-(current week). Each chart is a JSON object like:
-
-```json
-{
-  "date": "2026-10-10",
-  "data": [
-    {"song": "Patient Zero", "artist": "Taylor Swift", "this_week": 1, "...": "..."}
-  ]
-}
-```
-
-`build_master()` walks charts newest-first, keeping the **first** appearance of
-each unique `(song, artist)` pair. The result is a newest-first master list.
-
-### 2. Song resolution
-
-For each song, `resolver.py` calls
-`ytmusicapi.search(f"{song} {artist}", filter="songs")`. It then validates that
-the returned artist matches the Billboard artist (case-insensitive,
-diacritic-stripped substring match).
-
-This catches common failures automatically:
-
-- Covers by unknown artists (rejected — artist mismatch)
-- Karaoke tracks (rejected — artist mismatch)
-- Diacritic differences like `ADELA` vs `ADÉLA` (accepted — normalized)
-
-If the top result fails validation, the next few results are tried (up to
-`SEARCH_TOP_N`, default 5).
-
-### 3. Database injection
-
-The NewPipe database is SQLite with three relevant tables:
-
-- **`streams`** — the actual videos (URL, title, duration, uploader)
-- **`playlists`** — playlist metadata (name, display index)
-- **`playlist_stream_join`** — links streams to playlists with a `join_index`
-
-Injection:
-
-1. Opens the `newpipe.db` from the extracted backup
-2. Finds or creates the target playlist
-3. Deletes all existing membership rows for that playlist
-4. Re-inserts every song in master order (`INSERT OR IGNORE` on streams to
-   reuse existing rows by `(service_id, url)`)
-5. Commits and repackages the zip
-
-It's **idempotent** — running twice gives the same result.
-
----
-
-## Design Decisions
-
-**Append-only URL cache.**
-Once a song has a resolved URL, it's never re-searched. YouTube matches drift,
-and re-running a full resolve would cost hours with no benefit. The cache is
-the source of truth.
-
-**Idempotent injection.**
-Every sync rebuilds the playlist from scratch instead of appending. This means
-no duplicates, no ordering drift, and running twice is safe.
-
-**Accumulative archive.**
-The playlist grows over time. Songs that drop off the chart stay in your
-playlist. Alternative: snapshot mode (current 100 only) — not implemented, but
-easy to add by filtering on the current chart before injection.
-
-**Newest-first ordering.**
-The master list is sorted newest-first, and injection preserves that order. So
-the playlist always shows the most recent songs at the top.
-
-**Unauthenticated ytmusicapi.**
-Works on residential IPs without browser cookies. If you run this from a data
-center (AWS, GitHub Actions, etc.), YouTube will block search requests. Use a
-home server or residential connection.
-
-**No "official" keyword in searches.**
-Keyword-stuffing degrades ytmusicapi's relevance ranking. The `filter="songs"`
-parameter is the right way to constrain results to music tracks.
-
----
-
-## Troubleshooting
-
-### "No module named 'ytmusicapi'"
-
-The virtual environment isn't active, or the package isn't installed:
-
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### "api_error: 429" or rate limit errors
-
-YouTube is throttling. Increase the sleep between requests:
-
-```bash
-CHARTPIPE_SLEEP=3 python -m chartpipe sync NewPipeData-in.zip
-```
-
-### "artist_mismatch" failures
-
-The resolver rejected the top result because the artist didn't match. Check
-`failed.json` — most are fixable by extending the top-N search, or by manual
-intervention. See the resolver's `SEARCH_TOP_N` constant.
-
-### Import fails in NewPipe
-
-- Force-close NewPipe completely before importing (swipe from recents)
-- Make sure the file is a valid `NewPipeData-*.zip`
-- Try restoring your original backup first, then re-importing
-
-### Playlist appears but is empty
-
-Check the DB before repackaging:
-
-```bash
-mkdir -p /tmp/check && cd /tmp/check
-unzip -o ~/devops/billboard-newpipe-sync/NewPipeData-out.zip
-sqlite3 newpipe.db "
-  SELECT COUNT(*) FROM playlist_stream_join
-  WHERE playlist_id = (SELECT uid FROM playlists WHERE name='Billboard Hot 100');
-"
-```
-
-### Lost `urls.json`
-
-The cache is the only thing that makes sync fast. If you lose it:
-
-1. Restore from a backup if you have one (`urls.json.bak`)
-2. Or extract URLs from an existing `NewPipeData-out.zip`'s database
-3. Or re-run `bootstrap` (slow — hours)
+- **Append-only cache** — a resolved song is never re-searched
+- **Idempotent injection** — every sync rebuilds the playlist from `urls.json`
+- **Residential IP required** — YouTube blocks data-center IPs
+- **Unauthenticated ytmusicapi** — no cookies or login required
 
 ---
 
 ## Environment Variables
 
-| Variable             | Default             | Purpose                              |
-| -------------------- | ------------------- | ------------------------------------ |
-| `CHARTPIPE_PLAYLIST` | `Billboard Hot 100` | Name of the target NewPipe playlist  |
-| `CHARTPIPE_SLEEP`    | `1.5`               | Seconds between ytmusicapi searches  |
+| Variable             | Default             | Purpose                          |
+| -------------------- | ------------------- | -------------------------------- |
+| `CHARTPIPE_PLAYLIST` | `Billboard Hot 100` | Target NewPipe playlist name     |
+| `CHARTPIPE_SLEEP`    | `1.5`               | Seconds between API searches     |
+| `CHARTPIPE_DATA`     | project root        | Data directory (used by Docker)  |
+
+---
+
+## Troubleshooting
+
+**`No module named 'ytmusicapi'`** — activate the venv and reinstall:
+
+```bash
+source .venv/bin/activate && pip install -r requirements.txt
+```
+
+**Rate-limited (`api_error: 429`)** — increase the sleep:
+
+```bash
+CHARTPIPE_SLEEP=3 python -m chartpipe sync NewPipeData-in.zip
+```
+
+**Import fails in NewPipe** — force-close the app first (swipe from recents),
+then retry the import.
+
+**Lost `urls.json`** — restore from `urls.json.bak`, extract URLs from an
+existing `NewPipeData-out.zip`, or re-run `bootstrap`.
 
 ---
 
 ## Requirements
 
-- Python 3.10+
-- `ytmusicapi` (installed via `requirements.txt`)
+- Python 3.10+ (or Docker)
 - A NewPipe backup (`.zip`)
-- A residential IP (YouTube blocks data-center IPs)
-
----
-
-## Roadmap
-
-Completed:
-
-- [x] Billboard parser
-- [x] YouTube URL resolver with artist validation
-- [x] NewPipe database injection
-- [x] CLI package structure
-- [x] Incremental sync
-- [x] Local JSON caching
-
-Planned:
-
-- [ ] Docker containerization
-- [ ] systemd timer for weekly automation
-- [ ] Notifications (ntfy / Discord)
-- [ ] Unit tests + GitHub Actions CI
-- [ ] Docker image published to GHCR
+- A residential IP (YouTube blocks cloud/datacenter IPs)
 
 ---
 
